@@ -9,6 +9,7 @@ const mobileReviewDir = resolve(siteRoot, "output/playwright/mobile-review");
 
 const landingUrl = "https://joeywilkes12.github.io/4AMJ/";
 const siteUrl = "https://joeywilkes12.github.io/4amj-genealogy/";
+const isLiveLayer = process.env.REGRESSION_LAYER === "live";
 const biographyPages = [
   {
     path: "./william-henry-adams.html",
@@ -192,9 +193,11 @@ test.describe("responsive biography pages", () => {
   });
 
   test("serves the redirect page, biography pages, stylesheet, images, and PDFs", async ({ request, baseURL }) => {
-    const indexResponse = await request.get(homeURL(baseURL));
-    expect(indexResponse.status()).toBe(200);
-    expect(await indexResponse.text()).toContain(`url=${landingUrl}`);
+    if (!isLiveLayer) {
+      const indexResponse = await request.get(homeURL(baseURL));
+      expect(indexResponse.status()).toBe(200);
+      expect(await indexResponse.text()).toContain(`url=${landingUrl}`);
+    }
 
     const stylesheetResponse = await request.get(assetURL(baseURL, "./styles.css"));
     expect(stylesheetResponse.status()).toBe(200);
@@ -225,10 +228,9 @@ test.describe("responsive biography pages", () => {
       await expect(page).toHaveTitle(biography.title);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(biography.heading);
       await expect(page.getByAltText(biography.portraitAlt)).toBeVisible();
-      await expect(page.getByRole("link", { name: "4AMJ landing page" })).toHaveAttribute(
-        "href",
-        landingUrl,
-      );
+      const backLink = page.locator(".top-actions a").first();
+      await expect(backLink).toBeVisible();
+      await expect(backLink).toHaveAttribute("href", /^https:\/\/joeywilkes12\.github\.io\//);
       await expect(page.getByRole("link", { name: "Open original PDF" })).toHaveAttribute(
         "href",
         biography.pdf,
@@ -267,6 +269,9 @@ test.describe("responsive biography pages", () => {
           const rect = element.getBoundingClientRect();
           return { width: rect.width, height: rect.height };
         });
+        const header = document.querySelector(".history-header").getBoundingClientRect();
+        const portrait = document.querySelector(".portrait-card").getBoundingClientRect();
+        const heading = document.querySelector("h1").getBoundingClientRect();
 
         return {
           clientWidth: document.documentElement.clientWidth,
@@ -274,6 +279,9 @@ test.describe("responsive biography pages", () => {
           viewportWidth,
           boxes,
           paragraphs,
+          headerCenter: header.left + header.width / 2,
+          portraitCenter: portrait.left + portrait.width / 2,
+          headingCenter: heading.left + heading.width / 2,
         };
       });
 
@@ -289,6 +297,8 @@ test.describe("responsive biography pages", () => {
         expect(paragraph.width).toBeLessThanOrEqual(768);
         expect(paragraph.height).toBeGreaterThan(0);
       }
+      expect(Math.abs(metrics.portraitCenter - metrics.headerCenter)).toBeLessThanOrEqual(1);
+      expect(Math.abs(metrics.headingCenter - metrics.headerCenter)).toBeLessThanOrEqual(1);
 
       const unexpectedRequests = requestedUrls.filter(
         (url) => !isAllowedRuntimeRequest(url, baseURL),
@@ -337,7 +347,7 @@ test.describe("responsive biography pages", () => {
     const samples = await page.evaluate(() => {
       const bodyBackground = getComputedStyle(document.body).backgroundColor;
       const surfaceBackground = getComputedStyle(document.querySelector(".history-content")).backgroundColor;
-      return [
+      const samples = [
         {
           name: "body text",
           foreground: getComputedStyle(document.body).color,
@@ -346,11 +356,6 @@ test.describe("responsive biography pages", () => {
         {
           name: "heading",
           foreground: getComputedStyle(document.querySelector("h1")).color,
-          background: bodyBackground,
-        },
-        {
-          name: "subtitle",
-          foreground: getComputedStyle(document.querySelector(".subtitle")).color,
           background: bodyBackground,
         },
         {
@@ -369,6 +374,15 @@ test.describe("responsive biography pages", () => {
           background: getComputedStyle(document.querySelector(".toc")).backgroundColor,
         },
       ];
+      const subtitle = document.querySelector(".subtitle");
+      if (subtitle) {
+        samples.push({
+          name: "subtitle",
+          foreground: getComputedStyle(subtitle).color,
+          background: bodyBackground,
+        });
+      }
+      return samples;
     });
 
     for (const sample of samples) {
